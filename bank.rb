@@ -1,8 +1,6 @@
-# bank.rb
-
 require 'pg'
-require 'bcrypt' # Added for password hashing
-require 'date' # Added for date parsing in account statements
+require 'bcrypt'
+require 'date'
 
 class Account
   attr_reader :account_id, :user_id, :account_type, :balance, :status, :overdraft_limit, :daily_withdrawal_limit, :daily_transfer_limit
@@ -16,7 +14,7 @@ class Account
     @overdraft_limit = overdraft_limit
     @daily_withdrawal_limit = daily_withdrawal_limit
     @daily_transfer_limit = daily_transfer_limit
-    @bank = bank # Reference to the bank instance
+    @bank = bank
   end
 
   def deposit(amount)
@@ -50,21 +48,19 @@ class Account
       return
     end
 
-    # Feature 7: Daily Withdrawal Limit
     if @daily_withdrawal_limit > 0 && (@bank.get_current_daily_withdrawal(@account_id) + amount) > @daily_withdrawal_limit
       puts "Withdrawal of #{amount} exceeds daily withdrawal limit of #{@daily_withdrawal_limit}. Current daily withdrawal: #{@bank.get_current_daily_withdrawal(@account_id)}"
       @bank.record_activity(@user_id, @account_id, 'withdrawal_failed', "Exceeded daily withdrawal limit with amount #{amount}.")
       return
     end
 
-    # Feature 1: Minimum Balance for Checking Accounts (and overdraft check)
     if @account_type == 'checking' && (@balance - amount) < 50 && (@balance - amount).abs > @overdraft_limit
       puts "Withdrawal would put checking account below minimum balance of 50 and exceeds overdraft limit. Current balance: #{@balance}"
       @bank.record_activity(@user_id, @account_id, 'withdrawal_failed', "Attempted withdrawal below minimum balance/overdraft limit with amount #{amount}.")
       return
     end
 
-    if @balance + @overdraft_limit >= amount # Allow withdrawal if within overdraft limit
+    if @balance + @overdraft_limit >= amount
       @balance -= amount
       @bank.update_account_balance(@account_id, @balance) if @bank
       @bank.update_current_daily_withdrawal(@account_id, @bank.get_current_daily_withdrawal(@account_id) + amount)
@@ -215,7 +211,7 @@ class Bank
     puts "Database error: #{e.message}"
   end
 
-  def record_activity(user_id, account_id, activity_type, details) # Feature 6: Activity Logging
+  def record_activity(user_id, account_id, activity_type, details)
     @conn.exec_params("INSERT INTO activity_log (user_id, account_id, activity_type, details) VALUES ($1, $2, $3, $4)", [user_id, account_id, activity_type, details])
   rescue PG::Error => e
     puts "Database error recording activity: #{e.message}"
@@ -249,7 +245,7 @@ class Bank
     puts "Database error: #{e.message}"
   end
 
-  def reset_daily_limits_for_all_accounts # Admin feature to reset daily limits
+  def reset_daily_limits_for_all_accounts
     @conn.exec("UPDATE accounts SET current_daily_withdrawal = 0, current_daily_transfer = 0")
     puts "Daily withdrawal and transfer limits reset for all accounts."
     record_activity(nil, nil, 'admin_action', 'Daily limits reset for all accounts.')
@@ -257,7 +253,7 @@ class Bank
     puts "Database error resetting daily limits: #{e.message}"
   end
 
-  def get_transaction_history(account_id, type_filter = nil) # Feature 5: Search Transactions by Type
+  def get_transaction_history(account_id, type_filter = nil)
     query = "SELECT type, amount, timestamp FROM transactions WHERE account_id = $1"
     params = [account_id]
 
@@ -345,7 +341,7 @@ class Bank
     puts "Database error: #{e.message}"
   end
 
-  def view_account_summary(user_id) # New Feature 5
+  def view_account_summary(user_id)
     accounts = get_user_accounts(user_id)
     if accounts.empty?
       puts "You have no accounts to display a summary for."
@@ -403,7 +399,6 @@ class Bank
         return
       end
 
-      # Feature 7: Daily Transfer Limit
       if from_account.daily_transfer_limit > 0 && (@conn.get_current_daily_transfer(from_account_id) + amount) > from_account.daily_transfer_limit
         puts "Transfer of #{amount} exceeds daily transfer limit of #{from_account.daily_transfer_limit} for account #{from_account_id}. Current daily transfer: #{@conn.get_current_daily_transfer(from_account_id)}"
         record_activity(from_account.user_id, from_account_id, 'transfer_failed', "Exceeded daily transfer limit with amount #{amount}.")
@@ -468,10 +463,9 @@ class Bank
       return
     end
 
-    # Feature 8: Loan Eligibility Check (basic)
     user_accounts = get_user_accounts(user_id)
     total_balance = user_accounts.sum(&:balance)
-    if total_balance < loan_amount * 0.1 # Example: user must have at least 10% of loan amount in other accounts
+    if total_balance < loan_amount * 0.1
       puts "Loan application denied. Total balance across your accounts is too low for a loan of #{loan_amount}. You need at least #{loan_amount * 0.1}."
       record_activity(user_id, nil, 'loan_application_denied', "Loan amount #{loan_amount} denied due to low total balance.")
       return
@@ -528,7 +522,7 @@ class Bank
   def delete_account(account_id)
     account = get_account(account_id)
     if account
-      if account.balance != 0 # Feature 10: Prevent Deletion of Non-Zero Balance Accounts
+      if account.balance != 0
         puts "Account ID #{account_id} cannot be deleted because its balance is not zero. Current balance: #{account.balance}"
         record_activity(account.user_id, account_id, 'account_deletion_failed', "Attempted to delete non-zero balance account.")
         return
@@ -555,7 +549,6 @@ class Bank
   end
 
   def delete_user(user_id)
-    # Feature 10: Prevent Deletion of Non-Zero Balance Accounts (for user's accounts)
     user_accounts = get_user_accounts(user_id)
     if user_accounts.any? { |acc| acc.balance != 0 }
       puts "Cannot delete user ID #{user_id}. One or more associated accounts have a non-zero balance."
@@ -563,9 +556,7 @@ class Bank
       return
     end
 
-    # First delete all accounts and their transactions for the user
     user_accounts.each do |account|
-      # Directly delete without confirmation prompt here to avoid nested prompts
       @conn.exec_params("DELETE FROM transactions WHERE account_id = $1", [account.account_id])
       @conn.exec_params("DELETE FROM accounts WHERE account_id = $1", [account.account_id])
       record_activity(user_id, account.account_id, 'account_deleted_by_user_deletion', "Account ID #{account.account_id} deleted as part of user deletion.")
@@ -579,7 +570,7 @@ class Bank
     record_activity(user_id, nil, 'user_deletion_failed', "Database error during user deletion: #{e.message}")
   end
 
-  def get_user_details(user_id) # Feature 3: Admin - View User Details
+  def get_user_details(user_id)
     user_result = @conn.exec_params("SELECT username FROM users WHERE user_id = $1", [user_id])
     if user_result.any?
       username = user_result[0]['username']
@@ -604,7 +595,7 @@ class Bank
     record_activity(nil, nil, 'admin_view_user_details_failed', "Database error viewing user details: #{e.message}")
   end
 
-  def set_account_description(account_id, description) # Feature 4: Account Nickname/Description
+  def set_account_description(account_id, description)
     @conn.exec_params("UPDATE accounts SET description = $1 WHERE account_id = $2", [description, account_id])
     puts "Description for account ID #{account_id} set to: '#{description}'."
     record_activity(nil, account_id, 'account_description_set', "Description for account ID #{account_id} set to '#{description}'.")
@@ -613,7 +604,7 @@ class Bank
     record_activity(nil, account_id, 'account_description_failed', "Database error setting account description: #{e.message}")
   end
 
-  def schedule_bill(user_id, payee, amount, due_date_str) # Feature 9: Bill Payment Scheduling
+  def schedule_bill(user_id, payee, amount, due_date_str)
     begin
       due_date = Date.parse(due_date_str)
     rescue ArgumentError
@@ -636,7 +627,7 @@ class Bank
     record_activity(user_id, nil, 'schedule_bill_failed', "Database error scheduling bill: #{e.message}")
   end
 
-  def pay_bill(bill_id, account_id) # Feature 9: Pay Scheduled Bill
+  def pay_bill(bill_id, account_id)
     bill_result = @conn.exec_params("SELECT user_id, payee, amount, status FROM bills WHERE bill_id = $1", [bill_id])
     if bill_result.empty?
       puts "Bill ID #{bill_id} not found."
@@ -686,7 +677,7 @@ class Bank
     record_activity(user_id, nil, 'pay_bill_failed', "Database error paying bill: #{e.message}")
   end
 
-  def view_scheduled_bills(user_id) # Feature 9: View Scheduled Bills
+  def view_scheduled_bills(user_id)
     result = @conn.exec_params("SELECT bill_id, payee, amount, due_date, status FROM bills WHERE user_id = $1 ORDER BY due_date ASC", [user_id])
     if result.empty?
       puts "No scheduled bills found for user ID #{user_id}."
@@ -701,7 +692,7 @@ class Bank
     puts "Database error viewing scheduled bills: #{e.message}"
   end
 
-  def view_activity_log(user_id = nil) # Feature 6: View Activity Log (Admin or User specific)
+  def view_activity_log(user_id = nil)
     query = "SELECT user_id, account_id, activity_type, details, timestamp FROM activity_log"
     params = []
     if user_id
@@ -725,7 +716,7 @@ class Bank
   end
 end
 
-  def get_user_details(user_id) # Feature 3: Admin - View User Details
+  def get_user_details(user_id)
     user_result = @conn.exec_params("SELECT username FROM users WHERE user_id = $1", [user_id])
     if user_result.any?
       username = user_result[0]['username']
@@ -747,13 +738,12 @@ end
     puts "Database error: #{e.message}"
   end
 
-  def set_account_description(account_id, description) # Feature 4: Account Nickname/Description
+  def set_account_description(account_id, description)
     @conn.exec_params("UPDATE accounts SET description = $1 WHERE account_id = $2", [description, account_id])
     puts "Description for account ID #{account_id} set to: '#{description}'."
   rescue PG::Error => e
     puts "Database error: #{e.message}"
   end
-end
 
 def run_bank_app
   bank = Bank.new
@@ -804,21 +794,21 @@ def run_bank_app
       puts "12. Delete My User Account"
       puts "13. Logout"
       puts "14. Admin: List All Accounts (All Users)"
-      puts "15. Generate Account Statement" # New Feature 1
-      puts "16. Admin: Freeze/Unfreeze Account" # New Feature 2
-      puts "17. Admin: Set Account Overdraft Limit" # New Feature 3
-      puts "18. Change Password" # New Feature 4
+      puts "15. Generate Account Statement"
+      puts "16. Admin: Freeze/Unfreeze Account"
+      puts "17. Admin: Set Account Overdraft Limit"
+      puts "18. Change Password"
       puts "19. View Account Summary"
       puts "20. Admin: View User Details"
       puts "21. Set Account Description"
-      puts "22. Schedule Bill Payment" # New Feature 9
-      puts "23. Pay Scheduled Bill" # New Feature 9
-      puts "24. View Scheduled Bills" # New Feature 9
-      puts "25. View My Activity Log" # New Feature 6
-      puts "26. Admin: View All Activity Log" # New Feature 6
-      puts "27. Admin: Set Daily Withdrawal Limit" # New Feature 7
-      puts "28. Admin: Set Daily Transfer Limit" # New Feature 7
-      puts "29. Admin: Reset All Daily Limits" # New Feature 7
+      puts "22. Schedule Bill Payment"
+      puts "23. Pay Scheduled Bill"
+      puts "24. View Scheduled Bills"
+      puts "25. View My Activity Log"
+      puts "26. Admin: View All Activity Log"
+      puts "27. Admin: Set Daily Withdrawal Limit"
+      puts "28. Admin: Set Daily Transfer Limit"
+      puts "29. Admin: Reset All Daily Limits"
       puts "30. Exit"
       print "Enter your choice: "
       choice = gets.chomp.to_i
